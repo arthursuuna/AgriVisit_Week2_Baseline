@@ -6,6 +6,9 @@ use App\Services\Checklist\ChecklistDrafter;
 use App\Services\Checklist\ChecklistParser;
 use App\Services\Checklist\RestrictedTopicGuard;
 use App\Services\Checklist\TraceWriter;
+use App\Services\Corpus\Chunker;
+use App\Services\Corpus\RestrictedSectionStripper;
+use App\Services\Corpus\TextExtractor;
 use App\Services\Llm\AnthropicClient;
 use App\Services\Llm\GoogleClient;
 use App\Services\Llm\LlmClient;
@@ -14,6 +17,7 @@ use App\Services\Llm\OpenAiClient;
 use App\Services\Prompts\PromptRepository;
 use App\Support\FarmProfileRepository;
 use Illuminate\Support\ServiceProvider;
+use Smalot\PdfParser\Parser;
 
 /**
  * Wires the Week 2 baseline.
@@ -68,6 +72,19 @@ class AgriVisitServiceProvider extends ServiceProvider
             $app->make(ChecklistParser::class),
             $app->make(TraceWriter::class),
             $params['promptVersion'] ?? config('agrivisit.prompt_version')
+        ));
+
+        $this->app->singleton(TextExtractor::class, fn () => new TextExtractor(new Parser()));
+
+        $this->app->singleton(RestrictedSectionStripper::class, fn () => new RestrictedSectionStripper(
+            config('agrivisit.corpus.excluded_headings')
+        ));
+
+        $this->app->singleton(Chunker::class, fn ($app) => new Chunker(
+            $app->make(RestrictedSectionStripper::class),
+            config('agrivisit.corpus.chunk_words'),
+            config('agrivisit.corpus.overlap_words'),
+            config('agrivisit.corpus.min_words')
         ));
     }
 }

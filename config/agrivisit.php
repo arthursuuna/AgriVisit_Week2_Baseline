@@ -80,4 +80,45 @@ return [
     ],
 
     'trace_path' => storage_path('app/traces'),
+
+    'corpus' => [
+        /*
+        | Where the source PDFs live. Kept out of version control: the register
+        | records where each document came from, so the files themselves need not
+        | be committed and publisher licences stay respected.
+        */
+        'pdf_path'     => storage_path('app/corpus/pdfs'),
+        'sources_file' => storage_path('app/corpus/sources.json'),
+
+        /*
+        | Chunk sizing, in words.
+        |
+        | PHP has no tokeniser, so chunks are measured in words. English runs at
+        | roughly 1.3 tokens per word, so 400 words is about 520 tokens: large
+        | enough to hold a complete instruction, small enough that retrieving one
+        | does not flood the prompt.
+        |
+        | The overlap exists so a sentence falling on a boundary survives whole in
+        | at least one chunk.
+        */
+        'chunk_words'   => 400,
+        'overlap_words' => 80,
+        'min_words'     => 40,   // discard fragments smaller than this
+
+        /*
+        | Headings whose sections are dropped during ingestion.
+        |
+        | The AI Boundary Matrix forbids dosing advice. Excluding it at ingestion
+        | rather than filtering at query time means retrieval cannot surface it at
+        | all: the guardrail has less to catch because the content is not there.
+        | Every removal is counted and recorded in the Corpus Register.
+        */
+        'excluded_headings' => [
+            'dosage', 'dose rate', 'application rate', 'rates of application',
+            'spray schedule', 'spray programme', 'spray program', 'chemical control',
+            'recommended pesticides', 'pesticide application', 'mixing instructions',
+            'dilution', 'veterinary', 'treatment schedule',
+            'how much pesticide',
+        ],
+    ],
 ];

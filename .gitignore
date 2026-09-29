@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 storage/app/traces/
+storage/app/corpus/pdfs/
 evaluation/
 evidence/
 
