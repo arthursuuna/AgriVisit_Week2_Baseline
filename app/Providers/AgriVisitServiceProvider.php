@@ -9,12 +9,17 @@ use App\Services\Checklist\TraceWriter;
 use App\Services\Corpus\Chunker;
 use App\Services\Corpus\RestrictedSectionStripper;
 use App\Services\Corpus\TextExtractor;
+use App\Services\Embedding\EmbeddingClient;
+use App\Services\Embedding\GeminiEmbeddingClient;
 use App\Services\Llm\AnthropicClient;
 use App\Services\Llm\GoogleClient;
 use App\Services\Llm\LlmClient;
 use App\Services\Llm\LlmException;
 use App\Services\Llm\OpenAiClient;
 use App\Services\Prompts\PromptRepository;
+use App\Services\Retrieval\CosineRetriever;
+use App\Services\Retrieval\FarmQueryBuilder;
+use App\Services\Retrieval\Retriever;
 use App\Support\FarmProfileRepository;
 use Illuminate\Support\ServiceProvider;
 use Smalot\PdfParser\Parser;
@@ -71,6 +76,8 @@ class AgriVisitServiceProvider extends ServiceProvider
             $app->make(RestrictedTopicGuard::class),
             $app->make(ChecklistParser::class),
             $app->make(TraceWriter::class),
+            $app->make(FarmQueryBuilder::class),
+            $app->make(Retriever::class),
             $params['promptVersion'] ?? config('agrivisit.prompt_version')
         ));
 
@@ -86,5 +93,18 @@ class AgriVisitServiceProvider extends ServiceProvider
             config('agrivisit.corpus.overlap_words'),
             config('agrivisit.corpus.min_words')
         ));
+
+        $this->app->singleton(EmbeddingClient::class, fn () => new GeminiEmbeddingClient(
+            config('agrivisit.embedding'),
+            config('agrivisit.llm.google.key')
+        ));
+
+        $this->app->singleton(CosineRetriever::class, fn ($app) => new CosineRetriever(
+            $app->make(EmbeddingClient::class),
+            config('agrivisit.embedding.retrieve_k'),
+            config('agrivisit.retrieval.threshold')
+        ));
+
+        $this->app->singleton(Retriever::class, fn ($app) => $app->make(CosineRetriever::class));
     }
 }

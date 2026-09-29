@@ -55,6 +55,31 @@ return [
     'checklist' => [
         'min_items' => 5,
         'max_items' => 10,
+
+        /*
+        | Per prompt version. From v2.0 every item must cite retrieved evidence,
+        | so the minimum drops to 3: forcing 5 would push the model to invent.
+        | Versions without retrieval keep "ungrounded" items and the 5-10 range.
+        */
+        'versions' => [
+            'v1.0' => ['min_items' => 5, 'max_items' => 10, 'grounded' => false],
+            'v1.1' => ['min_items' => 5, 'max_items' => 10, 'grounded' => false],
+            'v2.0' => ['min_items' => 3, 'max_items' => 10, 'grounded' => true],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retrieval for grounded drafting (Week 3 Phase 3)
+    |--------------------------------------------------------------------------
+    | Phase 2 measured 0.58 for an unanswerable query and 0.70-0.87 for real
+    | ones; the threshold sits in that gap. Results are restricted to the farm's
+    | crops first, then topped up from the whole corpus.
+    */
+
+    'retrieval' => [
+        'threshold'  => (float) env('RETRIEVAL_THRESHOLD', 0.65),
+        'max_chunks' => (int) env('RETRIEVAL_MAX_CHUNKS', 8),
     ],
 
     /*
@@ -80,6 +105,23 @@ return [
     ],
 
     'trace_path' => storage_path('app/traces'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Embeddings and retrieval (Week 3 Phase 2)
+    |--------------------------------------------------------------------------
+    | Same Google key as the drafting model, so no second provider. 768
+    | dimensions: gemini-embedding-001 does not normalise below 3072, so the
+    | client L2-normalises every vector itself.
+    */
+
+    'embedding' => [
+        'model'      => env('EMBEDDING_MODEL', 'gemini-embedding-001'),
+        'dimensions' => (int) env('EMBEDDING_DIMENSIONS', 768),
+        'endpoint'   => 'https://generativelanguage.googleapis.com/v1beta/models',
+        'timeout'    => 30,
+        'retrieve_k' => (int) env('RETRIEVE_K', 6),
+    ],
 
     'corpus' => [
         /*

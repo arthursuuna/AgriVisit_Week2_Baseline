@@ -40,6 +40,14 @@
         .banner.refused { background: var(--danger-soft); border: 1px solid var(--danger); }
         .banner.failed  { background: var(--warn-soft);   border: 1px solid var(--warn); }
         .banner.draft   { background: var(--accent-soft); border: 1px solid var(--accent); }
+        .banner.no-evidence { background: #f7f9fb; border: 1px solid var(--muted); }
+        .cite { margin-top: .35rem; font-size: .85rem; }
+        .cite summary { cursor: pointer; color: var(--accent); }
+        .cite summary code { background: #f0f3f6; padding: .05rem .3rem; border-radius: 3px; color: var(--ink); }
+        .cite blockquote {
+            margin: .45rem 0 0; padding: .6rem .8rem; background: #f7f9fb;
+            border-left: 3px solid var(--accent); color: var(--ink); white-space: pre-wrap;
+        }
         .banner strong { display: block; margin-bottom: .25rem; }
         ol.items { padding-left: 1.2rem; margin: 0; }
         ol.items li { margin-bottom: .95rem; }
@@ -63,7 +71,7 @@
 
     <header>
         <h1>AgriVisit</h1>
-        <div class="sub">Visit Prep Console — Week 2 baseline. Drafts only; no retrieval, tools or memory yet.</div>
+        <div class="sub">Visit Prep Console — Week 3. Drafts grounded in Ugandan extension manuals; no tools or memory yet.</div>
     </header>
 
     @if ($errors->any())
@@ -107,11 +115,23 @@
                 <strong>No draft produced</strong>
                 {{ $result->message }}
             </div>
+        @elseif ($result->status === 'no_evidence')
+            <div class="banner no-evidence">
+                <strong>No supporting guidance found</strong>
+                {{ $result->message }}
+                <div class="meta" style="border:0;margin:.5rem 0 0;padding:0">Trace <code>{{ $result->traceId }}</code></div>
+            </div>
         @else
             <div class="banner draft">
                 <strong>Draft only — not approved for field use</strong>
-                Items are ungrounded: no agronomy corpus is connected until Week 3, so nothing
-                here carries a citation. The officer must verify every item before use.
+                @if ($result->evidenceCount > 0)
+                    Each item cites a passage from an extension manual. Open the citation to read the
+                    passage and check it supports the item. The officer must still approve every item
+                    before use.
+                @else
+                    Items are ungrounded: this prompt version does not use the extension manuals, so
+                    nothing here carries a citation. The officer must verify every item before use.
+                @endif
             </div>
 
             <div class="card">
@@ -125,6 +145,15 @@
                             <span class="item-head">{{ $item['item'] }}</span>
                             <span class="cat">{{ $item['category'] }}</span>
                             <div class="why">{{ $item['rationale'] }}</div>
+                            @if (! empty($item['citation']))
+                                <details class="cite">
+                                    <summary>
+                                        Source: {{ $item['citation']['document'] }}@if ($item['citation']['section']) — {{ $item['citation']['section'] }}@endif
+                                        <code>{{ $item['citation']['chunk_ref'] }}</code>
+                                    </summary>
+                                    <blockquote>{{ $item['citation']['text'] }}</blockquote>
+                                </details>
+                            @endif
                         </li>
                     @endforeach
                 </ol>
@@ -135,6 +164,7 @@
                     · Temperature <code>{{ $result->meta->temperature }}</code>
                     · {{ $result->meta->inputTokens }} in / {{ $result->meta->outputTokens }} out tokens
                     · {{ $result->meta->latencyMs }} ms
+                    · {{ $result->evidenceCount }} evidence {{ \Illuminate\Support\Str::plural('passage', $result->evidenceCount) }} supplied
                     · Trace <code>{{ $result->traceId }}</code>
                 </div>
             </div>
