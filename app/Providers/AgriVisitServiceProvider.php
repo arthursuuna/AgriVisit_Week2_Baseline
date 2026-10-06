@@ -12,6 +12,9 @@ use App\Services\Corpus\TextExtractor;
 use App\Services\Embedding\EmbeddingClient;
 use App\Services\Embedding\GeminiEmbeddingClient;
 use App\Services\Llm\AnthropicClient;
+use App\Services\Llm\FunctionCalling\FunctionCallingClient;
+use App\Services\Llm\FunctionCalling\GeminiFunctionCallingClient;
+use App\Services\Llm\FunctionCalling\SchemaTranslator;
 use App\Services\Llm\GoogleClient;
 use App\Services\Llm\LlmClient;
 use App\Services\Llm\LlmException;
@@ -20,6 +23,15 @@ use App\Services\Prompts\PromptRepository;
 use App\Services\Retrieval\CosineRetriever;
 use App\Services\Retrieval\FarmQueryBuilder;
 use App\Services\Retrieval\Retriever;
+use App\Services\Tools\Catalogue\FarmProfileLookupTool;
+use App\Services\Tools\Catalogue\LogFollowupTool;
+use App\Services\Tools\Catalogue\ScheduleVisitTool;
+use App\Services\Tools\SchemaValidator;
+use App\Services\Tools\ToolCallLog;
+use App\Services\Tools\ToolInvoker;
+use App\Services\Tools\ToolPolicy;
+use App\Services\Tools\ToolRegistry;
+use App\Services\Tools\ToolSession;
 use App\Support\FarmProfileRepository;
 use Illuminate\Support\ServiceProvider;
 use Smalot\PdfParser\Parser;
@@ -106,5 +118,44 @@ class AgriVisitServiceProvider extends ServiceProvider
         ));
 
         $this->app->singleton(Retriever::class, fn ($app) => $app->make(CosineRetriever::class));
+
+        // Week 4 tool layer. Registration is the allow-list; config decides
+        // which registered tools are enabled.
+        $this->app->singleton(ToolRegistry::class, function ($app) {
+            $registry = new ToolRegistry();
+            $registry->register($app->make(FarmProfileLookupTool::class));
+            $registry->register($app->make(ScheduleVisitTool::class));
+            $registry->register($app->make(LogFollowupTool::class));
+
+            return $registry;
+        });
+
+        $this->app->singleton(ToolCallLog::class, fn () => new ToolCallLog(
+            config('agrivisit.tools.log_path')
+        ));
+
+        $this->app->singleton(ToolInvoker::class, fn ($app) => new ToolInvoker(
+            $app->make(ToolRegistry::class),
+            $app->make(SchemaValidator::class),
+            $app->make(ToolPolicy::class),
+            $app->make(ToolCallLog::class)
+        ));
+
+        // Week 4 Phase 2: the model proposes calls; ToolInvoker still decides.
+        $this->app->singleton(FunctionCallingClient::class, fn () => new GeminiFunctionCallingClient(
+            config('agrivisit.llm')
+        ));
+
+        $this->app->bind(ToolSession::class, fn ($app) => new ToolSession(
+            $app->make(RestrictedTopicGuard::class),
+            $app->make(SchemaTranslator::class),
+            $app->make(ToolRegistry::class),
+            $app->make(ToolPolicy::class),
+            $app->make(ToolInvoker::class),
+            $app->make(FunctionCallingClient::class),
+            $app->make(PromptRepository::class),
+            new ToolCallLog(config('agrivisit.tools.session_log_path')),
+            config('agrivisit.tools.prompt_version')
+        ));
     }
 }

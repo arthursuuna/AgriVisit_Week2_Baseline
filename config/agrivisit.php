@@ -163,4 +163,30 @@ return [
             'how much pesticide',
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tool layer (Week 4)
+    |--------------------------------------------------------------------------
+    | A tool must be both registered (AgriVisitServiceProvider) and listed here
+    | to run. Removing a name disables the tool without deleting it; calls to it
+    | then return UNAUTHORIZED. Every attempt is logged under log_path.
+    */
+
+    'tools' => [
+        'enabled' => [
+            'farm_profile_lookup',
+            'schedule_visit',
+            'log_followup',
+        ],
+        'log_path' => storage_path('app/tool-logs'),
+
+        /*
+        | Function calling (Week 4 Phase 2). The model is the same Gemini model and
+        | sampling settings as drafting (the 'llm' block). One line per request is
+        | written to session_log_path, beside the per-call tool log.
+        */
+        'prompt_version'   => env('TOOLS_PROMPT_VERSION', 'v1.0'),
+        'session_log_path' => storage_path('app/tool-sessions'),
+    ],
 ];

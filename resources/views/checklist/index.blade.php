@@ -71,7 +71,8 @@
 
     <header>
         <h1>AgriVisit</h1>
-        <div class="sub">Visit Prep Console — Week 3. Drafts grounded in Ugandan extension manuals; no tools or memory yet.</div>
+        <div class="sub">Visit Prep Console — Week 3. Drafts grounded in Ugandan extension manuals.
+            <a href="{{ route('tools.index') }}" style="color:var(--accent)">Tool Console →</a></div>
     </header>
 
     @if ($errors->any())

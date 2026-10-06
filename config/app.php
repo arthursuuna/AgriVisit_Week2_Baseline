@@ -65,7 +65,9 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Kampala, not UTC: "today" for schedule_visit's past-date check must be
+    // the officer's today, which UTC lags by three hours after midnight.
+    'timezone' => 'Africa/Kampala',
 
     /*
     |--------------------------------------------------------------------------
