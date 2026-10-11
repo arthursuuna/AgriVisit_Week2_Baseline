@@ -18,6 +18,13 @@ final class ToolResult
     public const SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE';
     public const UNEXPECTED_RESPONSE = 'UNEXPECTED_RESPONSE';
 
+    /**
+     * Week 5: the arguments were well-formed but the topic is restricted (the
+     * restricted-topic guard fired on a query the agent composed). Kept apart
+     * from INVALID_ARGUMENTS so a supervisor can tell the two causes apart.
+     */
+    public const GUARD_REFUSED       = 'GUARD_REFUSED';
+
     private function __construct(
         public readonly bool $ok,
         public readonly array $data,

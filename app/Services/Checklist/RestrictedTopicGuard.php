@@ -32,11 +32,9 @@ class RestrictedTopicGuard
     {
         $haystack = mb_strtolower($text);
 
-        foreach ($this->restricted as $category => $terms) {
-            foreach ($terms as $term) {
-                if (str_contains($haystack, mb_strtolower($term))) {
-                    return $category;
-                }
+        foreach ($this->restricted as $category => $rule) {
+            if ($this->matches($rule, $haystack)) {
+                return $category;
             }
         }
 
@@ -45,6 +43,52 @@ class RestrictedTopicGuard
         }
 
         return null;
+    }
+
+    /**
+     * A category's rule is either a plain list of phrases (any one refuses) or,
+     * since Week 5 Phase 3, a subject rule: 'always' phrases refuse alone, and
+     * 'terms' refuse only alongside one of the 'subjects'. The subject rule
+     * exists because the agent composes its own search queries, and "how to
+     * diagnose maize leaf damage" is crop work, not a clinical request. It
+     * narrows by what is being treated, never by deleting the clinical verb.
+     */
+    private function matches(array $rule, string $haystack): bool
+    {
+        if (array_is_list($rule)) {
+            return $this->containsAny($rule, $haystack);
+        }
+
+        if ($this->containsAny($rule['always'] ?? [], $haystack)) {
+            return true;
+        }
+
+        return $this->containsWord($rule['terms'] ?? [], $haystack)
+            && $this->containsWord($rule['subjects'] ?? [], $haystack);
+    }
+
+    /** Substring match, as the original term lists always worked. */
+    private function containsAny(array $phrases, string $haystack): bool
+    {
+        foreach ($phrases as $phrase) {
+            if (str_contains($haystack, mb_strtolower($phrase))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Whole-word match, so "pig" does not fire on "pigeon pea" nor "ill" on "drill". */
+    private function containsWord(array $words, string $haystack): bool
+    {
+        foreach ($words as $word) {
+            if (preg_match('/\b' . preg_quote(mb_strtolower($word), '/') . '\b/u', $haystack) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
