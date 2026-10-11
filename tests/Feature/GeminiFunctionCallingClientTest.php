@@ -81,4 +81,51 @@ class GeminiFunctionCallingClientTest extends TestCase
             }
         }
     }
+
+    private function failure(): LlmException
+    {
+        try {
+            $this->client()->generate('s', [['role' => 'user', 'parts' => [['text' => 'hi']]]], []);
+        } catch (LlmException $e) {
+            return $e;
+        }
+
+        $this->fail('Expected LlmException');
+    }
+
+    public function test_a_429_becomes_a_rate_limited_llm_exception_carrying_the_status(): void
+    {
+        Http::fake(['*' => Http::response(['error' => ['code' => 429, 'status' => 'RESOURCE_EXHAUSTED']], 429)]);
+
+        $e = $this->failure();
+
+        $this->assertSame(429, $e->status);
+        $this->assertSame(LlmException::RATE_LIMITED, $e->kind);
+        $this->assertTrue($e->isRateLimited());
+        $this->assertStringContainsString('rate limited, try again later', $e->reason());
+    }
+
+    public function test_a_connection_timeout_becomes_a_timeout_llm_exception(): void
+    {
+        Http::fake(['*' => Http::failedConnection('cURL error 28: Operation timed out after 5001 milliseconds')]);
+
+        $e = $this->failure();
+
+        $this->assertSame(LlmException::TIMEOUT, $e->kind);
+        $this->assertNull($e->status);
+        $this->assertStringContainsString('timed out after 5 s', $e->getMessage());
+    }
+
+    public function test_a_refused_connection_and_a_503_are_unavailable(): void
+    {
+        Http::fake(['*' => Http::sequence()
+            ->pushFailedConnection('cURL error 7: Failed to connect')
+            ->push('overloaded', 503)]);
+
+        $this->assertSame(LlmException::UNAVAILABLE, $this->failure()->kind);
+
+        $e = $this->failure();
+        $this->assertSame(LlmException::UNAVAILABLE, $e->kind);
+        $this->assertSame(503, $e->status);
+    }
 }

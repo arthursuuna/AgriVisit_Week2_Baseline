@@ -2,13 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ToolApproval;
+use App\Services\Tools\ApprovalOutcome;
+use App\Services\Tools\ApprovalService;
 use App\Services\Tools\ToolCallLog;
 use App\Services\Tools\ToolInvoker;
 use App\Services\Tools\ToolRegistry;
 use App\Services\Tools\ToolResult;
 use App\Services\Tools\ToolSession;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 /**
@@ -16,22 +18,20 @@ use Illuminate\View\View;
  *
  * Drives ToolInvoker exactly as tinker does: no model, and no validation of
  * its own. Whatever the officer types reaches the invoker, so the page shows
- * the real refusals. Pending write calls are held in the session and replayed
- * verbatim on approval, never rebuilt from the form.
+ * the real refusals. Pending write calls are held server-side by
+ * ApprovalService and replayed verbatim on approval, never rebuilt from the
+ * form. Every decision, either way, is recorded in tool_approvals.
  */
 class ToolConsoleController extends Controller
 {
     /** Select value meaning "use the free-text tool name instead". */
     public const OTHER = '__other';
 
-    private const PENDING_KEY = 'tool_console.pending';
-
-    private const ASK_PENDING_KEY = 'tool_console.ask_pending';
-
     public function __construct(
         private readonly ToolRegistry $registry,
         private readonly ToolInvoker $invoker,
         private readonly ToolCallLog $log,
+        private readonly ApprovalService $approvals,
     ) {
     }
 
@@ -58,52 +58,53 @@ class ToolConsoleController extends Controller
         }
 
         // Never approved here: approval only ever comes from approve().
-        $result = $this->invoker->invoke($name, $args);
-        $token  = null;
+        $result   = $this->invoker->invoke($name, $args);
+        $duration = $this->lastDuration();
+        $held     = null;
 
         if ($result->code === ToolResult::APPROVAL_REQUIRED && $result->pending !== null) {
-            $token = (string) Str::uuid();
-            $request->session()->put(self::PENDING_KEY . '.' . $token, $result->pending);
+            $held = $this->approvals->hold($result->pending, (string) $result->message, ToolApproval::ORIGIN_MANUAL);
         }
 
         return $this->page($selected, $other, $posted, [
             'tool'     => $name,
             'args'     => $args,
             'result'   => $result,
-            'duration' => $this->lastDuration(),
-            'token'    => $token,
+            'duration' => $duration,
+            'held'     => $held,
         ]);
     }
 
     public function approve(Request $request): View
     {
-        $token   = (string) $request->input('token', '');
-        $pending = $request->session()->pull(self::PENDING_KEY . '.' . $token);
+        $decision = $this->decide($request, function (array $pending) {
+            // The exact tool and arguments the invoker returned, replayed verbatim.
+            return $this->invoker->invoke($pending['tool'], $pending['arguments'], true);
+        });
 
-        if ($pending === null) {
-            return $this->page(self::OTHER, '', [], [
-                'notice' => 'That approval has expired or was already used. Nothing was written.',
-            ]);
+        if ($decision->status !== ApprovalOutcome::APPROVED) {
+            return $this->page($decision->tool() ?? self::OTHER, '', $decision->arguments(), ['decision' => $decision]);
         }
 
-        $tool = $pending['tool'];
-
-        if ($request->input('decision') === 'cancel') {
-            return $this->page($tool, '', $pending['arguments'], [
-                'notice' => "Cancelled. The {$tool} call was discarded and nothing was written.",
-            ]);
-        }
-
-        // The exact tool and arguments the invoker returned, replayed verbatim.
-        $result = $this->invoker->invoke($tool, $pending['arguments'], true);
-
-        return $this->page($tool, '', $pending['arguments'], [
-            'tool'     => $tool,
-            'args'     => $pending['arguments'],
-            'result'   => $result,
+        return $this->page($decision->tool(), '', $decision->arguments(), [
+            'tool'     => $decision->tool(),
+            'args'     => $decision->arguments(),
+            'result'   => $decision->toolResult,
             'duration' => $this->lastDuration(),
             'approved' => true,
+            'decision' => $decision,
         ]);
+    }
+
+    /** Approve or reject, read from the posted form. 'cancel' is a rejection. */
+    private function decide(Request $request, callable $execute): ApprovalOutcome
+    {
+        return $this->approvals->decide(
+            (string) $request->input('token', ''),
+            $request->input('decision') === 'approve' ? 'approve' : 'reject',
+            $request->input('reason'),
+            $execute,
+        );
     }
 
     /**
@@ -171,37 +172,53 @@ class ToolConsoleController extends Controller
         }
 
         $result = $session->handle($question);
-        $token  = null;
+        $held   = null;
 
         if ($result->pending !== null) {
-            $token = (string) Str::uuid();
-            $request->session()->put(self::ASK_PENDING_KEY . '.' . $token, [
-                'request' => $question,
-                'call'    => $result->pending,
-            ]);
+            $held = $this->approvals->hold($result->pending, $result->pending['summary'],
+                ToolApproval::ORIGIN_MODEL, $result->sessionId, $question);
         }
 
-        return $this->askPage(['question' => $question, 'result' => $result, 'token' => $token]);
+        return $this->askPage(['question' => $question, 'result' => $result, 'held' => $held]);
     }
 
     public function askApprove(Request $request, ToolSession $session): View
     {
-        $held = $request->session()->pull(self::ASK_PENDING_KEY . '.' . $request->input('token', ''));
-
-        if ($held === null) {
-            return $this->askPage(['question' => '',
-                'notice' => 'That approval has expired or was already used. Nothing was written.']);
-        }
-
-        if ($request->input('decision') === 'cancel') {
-            return $this->askPage(['question' => $held['request'],
-                'notice' => "Cancelled. The {$held['call']['tool']} call was discarded and nothing was written."]);
-        }
-
         // The held call, exactly as the gate returned it. Approval is this click, never the model.
-        $result = $session->handle($held['request'], $held['call']);
+        $decision = $this->decide($request, fn (array $pending) => $session->handle($pending['request'], $pending));
 
-        return $this->askPage(['question' => $held['request'], 'result' => $result, 'approved' => true]);
+        if ($decision->status !== ApprovalOutcome::APPROVED) {
+            return $this->askPage(['question' => $decision->request() ?? '', 'decision' => $decision]);
+        }
+
+        return $this->askPage([
+            'question' => $decision->request(),
+            'result'   => $decision->executed,
+            'approved' => true,
+            'decision' => $decision,
+        ]);
+    }
+
+    /**
+     * The supervisor's view: the latest decisions, who made them and what they
+     * were shown. Story 9: which actions the assistant proposed, which a person
+     * entered, and what was approved or rejected.
+     */
+    public function audit(Request $request): View
+    {
+        $decisions = [ToolApproval::APPROVED, ToolApproval::REJECTED, ToolApproval::EXPIRED];
+        $filter    = in_array($request->query('decision'), $decisions, true) ? $request->query('decision') : null;
+
+        return view('tools.audit', [
+            'records'   => ToolApproval::query()
+                ->when($filter, fn ($q) => $q->where('decision', $filter))
+                ->orderByDesc('id')
+                ->limit(50)
+                ->get(),
+            'filter'    => $filter,
+            'decisions' => $decisions,
+            'counts'    => ToolApproval::query()->selectRaw('decision, count(*) as n')->groupBy('decision')->pluck('n', 'decision'),
+        ]);
     }
 
     private function askPage(array $ask): View
@@ -222,6 +239,7 @@ class ToolConsoleController extends Controller
             'values'     => $values,
             'outcome'    => $outcome,
             'ask'        => $ask,
+            'expiry'     => $this->approvals->expiryMinutes(),
             'errorLines' => $this->errorLines($outcome['result'] ?? null),
             'recent'     => array_slice(array_reverse($this->log->entries()), 0, 15),
             'refusals'   => $this->refusals(),

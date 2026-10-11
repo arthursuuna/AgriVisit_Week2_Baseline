@@ -23,9 +23,14 @@ use App\Services\Prompts\PromptRepository;
 use App\Services\Retrieval\CosineRetriever;
 use App\Services\Retrieval\FarmQueryBuilder;
 use App\Services\Retrieval\Retriever;
+use App\Services\Tools\ApprovalPreview;
+use App\Services\Tools\ApprovalService;
 use App\Services\Tools\Catalogue\FarmProfileLookupTool;
+use App\Services\Tools\Catalogue\FaultyProbeTool;
 use App\Services\Tools\Catalogue\LogFollowupTool;
+use App\Services\Tools\Catalogue\MalformedProbeTool;
 use App\Services\Tools\Catalogue\ScheduleVisitTool;
+use App\Services\Tools\PendingCallStore;
 use App\Services\Tools\SchemaValidator;
 use App\Services\Tools\ToolCallLog;
 use App\Services\Tools\ToolInvoker;
@@ -127,6 +132,12 @@ class AgriVisitServiceProvider extends ServiceProvider
             $registry->register($app->make(ScheduleVisitTool::class));
             $registry->register($app->make(LogFollowupTool::class));
 
+            // Test instrumentation only: absent from the allow-list unless switched on.
+            if (config('agrivisit.tools.probes_enabled')) {
+                $registry->register($app->make(FaultyProbeTool::class));
+                $registry->register($app->make(MalformedProbeTool::class));
+            }
+
             return $registry;
         });
 
@@ -156,6 +167,18 @@ class AgriVisitServiceProvider extends ServiceProvider
             $app->make(PromptRepository::class),
             new ToolCallLog(config('agrivisit.tools.session_log_path')),
             config('agrivisit.tools.prompt_version')
+        ));
+
+        // Week 4 Phase 3: held calls live in the cache; the browser holds only a token.
+        $this->app->bind(PendingCallStore::class, fn ($app) => new PendingCallStore(
+            $app->make('cache')->store(),
+            (int) config('agrivisit.tools.approval_expiry_minutes', 10)
+        ));
+
+        $this->app->bind(ApprovalService::class, fn ($app) => new ApprovalService(
+            $app->make(PendingCallStore::class),
+            $app->make(ApprovalPreview::class),
+            $app->make(ToolCallLog::class)
         ));
     }
 }

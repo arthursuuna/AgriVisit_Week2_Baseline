@@ -210,7 +210,7 @@ class ToolConsoleTest extends TestCase
 
         $held = $this->post(route('tools.ask'), ['question' => 'Book a visit to UG-KYA-012'])
             ->assertSee('APPROVAL_REQUIRED')
-            ->assertSee('proposed by the model')
+            ->assertSee('Proposed by the assistant')
             ->assertSee('Schedule a visit to UG-KYA-012 on ' . $this->scheduleArgs()['visit_date'] . '.');
 
         $this->assertSame(0, Visit::count());

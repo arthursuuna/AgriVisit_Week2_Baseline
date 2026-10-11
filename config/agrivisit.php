@@ -16,7 +16,7 @@ return [
         'model'       => env('LLM_MODEL', 'gemini-3.5-flash'),
         'temperature' => (float) env('LLM_TEMPERATURE', 0.2),
         'max_tokens'  => (int) env('LLM_MAX_TOKENS', 1500),
-        'timeout'     => (int) env('LLM_TIMEOUT', 45),
+        'timeout'     => (int) env('LLM_TIMEOUT', 25),
 
         'anthropic' => [
             'key'     => env('ANTHROPIC_API_KEY'),
@@ -174,11 +174,20 @@ return [
     */
 
     'tools' => [
-        'enabled' => [
+        // TOOLS_DISABLED (comma-separated) switches a tool off without a code
+        // change, e.g. to show UNAUTHORIZED from the model (Week 4 Phase 4).
+        'enabled' => array_values(array_diff([
             'farm_profile_lookup',
             'schedule_visit',
             'log_followup',
-        ],
+        ], array_map('trim', explode(',', (string) env('TOOLS_DISABLED', ''))))),
+
+        /*
+        | Diagnostic probes (faulty_probe, malformed_probe): test instrumentation
+        | that makes SERVICE_UNAVAILABLE and UNEXPECTED_RESPONSE demonstrable in
+        | the running app. Off by default; never offered to the model.
+        */
+        'probes_enabled' => (bool) env('TOOLS_PROBES_ENABLED', false),
         'log_path' => storage_path('app/tool-logs'),
 
         /*
@@ -188,5 +197,22 @@ return [
         */
         'prompt_version'   => env('TOOLS_PROMPT_VERSION', 'v1.0'),
         'session_log_path' => storage_path('app/tool-sessions'),
+
+        /*
+        | Officer approval (Week 4 Phase 3). A held write call must be decided
+        | within this many minutes, or it expires and must be proposed again.
+        */
+        'approval_expiry_minutes' => (int) env('TOOLS_APPROVAL_EXPIRY_MINUTES', 10),
+    ],
+
+    /*
+    | The officer recorded on every approval decision. CONFIGURED, NOT
+    | AUTHENTICATED: there is no login in this application, so this identity is
+    | asserted, never verified. Real deployment needs authentication before the
+    | audit record carries weight.
+    */
+    'officer' => [
+        'id'   => env('OFFICER_ID', 'officer-001'),
+        'name' => env('OFFICER_NAME', 'Extension Officer'),
     ],
 ];

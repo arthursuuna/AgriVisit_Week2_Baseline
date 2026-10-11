@@ -57,8 +57,9 @@ class ToolSession
                 ? $this->propose($request, $trace)
                 : $this->resume($request, $approvedCall, $trace);
         } catch (LlmException $e) {
-            $result = $this->result($trace, SessionResult::MODEL_ERROR,
-                'The model could not be reached: ' . $e->getMessage());
+            // A rate limit or timeout is a reported outcome, never an error page.
+            $trace['model_error'] = $this->describe($e);
+            $result = $this->result($trace, SessionResult::MODEL_ERROR, $e->reason());
         }
 
         $this->log->record($trace + [
@@ -140,7 +141,22 @@ class ToolSession
         $result = $this->invoker->invoke($call['name'], $call['args'], true);
         $trace['gate_outcome'] = $result->code ?? 'OK';
 
-        return $this->explain([$this->userTurn($request)], $approvedCall['model_turn'], $call, $result, $declarations, $trace, approved: true);
+        try {
+            return $this->explain([$this->userTurn($request)], $approvedCall['model_turn'], $call, $result, $declarations, $trace, approved: true);
+        } catch (LlmException $e) {
+            // The write has already happened; the approval record needs its result.
+            $trace['model_error'] = $this->describe($e);
+
+            return $this->result($trace, SessionResult::MODEL_ERROR,
+                'The approved action was carried out, but the model could not describe it. ' . $e->reason(),
+                tool: $call['name'], args: $call['args'], toolResult: $result);
+        }
+    }
+
+    /** What the session log keeps about a model failure; the officer sees only reason(). */
+    private function describe(LlmException $e): array
+    {
+        return ['kind' => $e->kind, 'status' => $e->status, 'message' => $e->getMessage()];
     }
 
     private function explain(array $contents, array $modelTurn, array $call, ToolResult $result, array $declarations, array &$trace, bool $approved = false): SessionResult
@@ -193,10 +209,14 @@ class ToolSession
         return $turn;
     }
 
-    /** Every enabled tool, translated. A disabled tool is not offered. */
+    /**
+     * Every enabled tool, translated. A disabled tool is not offered, and a
+     * diagnostic probe is never offered, enabled or not.
+     */
     private function declarations(): array
     {
-        $enabled = array_filter($this->registry->all(), fn (ToolContract $tool) => $this->policy->allows($tool));
+        $enabled = array_filter($this->registry->all(), fn (ToolContract $tool) => ! $tool instanceof DiagnosticTool
+            && $this->policy->allows($tool));
 
         return array_values(array_map(fn (ToolContract $tool) => $this->translator->toFunctionDeclaration($tool), $enabled));
     }

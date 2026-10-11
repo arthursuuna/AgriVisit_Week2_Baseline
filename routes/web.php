@@ -12,3 +12,4 @@ Route::post('/tools/run', [ToolConsoleController::class, 'run'])->name('tools.ru
 Route::post('/tools/approve', [ToolConsoleController::class, 'approve'])->name('tools.approve');
 Route::post('/tools/ask', [ToolConsoleController::class, 'ask'])->name('tools.ask');
 Route::post('/tools/ask/approve', [ToolConsoleController::class, 'askApprove'])->name('tools.ask.approve');
+Route::get('/tools/audit', [ToolConsoleController::class, 'audit'])->name('tools.audit');

@@ -67,15 +67,14 @@ class GoogleClient implements LlmClient
                     ],
                 ]);
         } catch (Throwable $e) {
-            throw new LlmException('Model request failed: ' . $e->getMessage(), 0, $e);
+            // Timeouts and refused connections become handled failures, never fatals.
+            throw LlmException::fromTransport($e, (int) $this->config['timeout']);
         }
 
         $latencyMs = (int) round((microtime(true) - $startedAt) * 1000);
 
         if ($response->failed()) {
-            throw new LlmException(
-                'Model returned HTTP ' . $response->status() . ': ' . $response->body()
-            );
+            throw LlmException::fromResponse($response);
         }
 
         $body = $response->json();
