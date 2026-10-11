@@ -228,7 +228,7 @@ class ToolCatalogueTest extends TestCase
         $tools = $this->app->make(ToolRegistry::class)->all();
 
         $this->assertSame(
-            ['farm_profile_lookup', 'schedule_visit', 'log_followup'],
+            ['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance'],
             array_map(fn (ToolContract $tool) => $tool->name(), $tools)
         );
 

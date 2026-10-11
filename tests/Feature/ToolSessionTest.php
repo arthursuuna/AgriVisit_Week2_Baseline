@@ -94,7 +94,7 @@ class ToolSessionTest extends TestCase
         $this->assertSame([], $this->toolLog->entries());
 
         // Declarations were offered, generated from the tools.
-        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup'],
+        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance'],
             array_column($fake->requests[0]['declarations'], 'name'));
     }
 
@@ -276,7 +276,7 @@ class ToolSessionTest extends TestCase
 
         $this->assertSame($result->sessionId, $entry['session_id']);
         $this->assertSame('What crops are on UG-KYA-012?', $entry['request']);
-        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup'], $entry['declarations']);
+        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance'], $entry['declarations']);
         $this->assertSame([['name' => 'farm_profile_lookup', 'args' => ['farm_id' => 'UG-KYA-012']]], $entry['proposed_calls']);
         $this->assertSame('OK', $entry['gate_outcome']);
         $this->assertFalse($entry['approval_required']);

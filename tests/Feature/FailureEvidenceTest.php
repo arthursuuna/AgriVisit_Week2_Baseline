@@ -197,6 +197,6 @@ class FailureEvidenceTest extends TestCase
         $this->app->make(ToolSession::class)->handle('What can you do?');
 
         $offered = array_column($fake->requests[0]['declarations'], 'name');
-        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup'], $offered);
+        $this->assertSame(['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance'], $offered);
     }
 }
