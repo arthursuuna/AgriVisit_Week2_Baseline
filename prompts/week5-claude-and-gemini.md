@@ -1,6 +1,6 @@
 # Week 5 Phase 1 — Claude for the agent loop, Gemini for everything else
 
-Status (2026-10-11): **Phases 1, 2 and 3 complete.** 260 tests passing. Phase 3
+Status (2026-10-12): **Phases 1–4 complete.** 274 tests passing. Committed on branch `week-5` (five commits, not pushed). Evidence in `evidence/week5-execution-traces.md` and `evidence/week5-boundaries.md`; Phase 4 report: `prompts/W5-phase-4-results.md`.
 added terminal guard refusals, persisted runs, resume across the Week 4
 approval flow and the browser workflow at `/agent` (results:
 `prompts/W5-phase-3-results.md`). Ready for Phase 4. Not yet committed.
