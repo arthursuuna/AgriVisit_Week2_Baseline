@@ -18,10 +18,36 @@ return [
         'max_tokens'  => (int) env('LLM_MAX_TOKENS', 1500),
         'timeout'     => (int) env('LLM_TIMEOUT', 25),
 
+        // Week 5: Claude runs the agent loop only; everything above (provider,
+        // model) still drives drafting and the Week 4 tool console on Gemini.
+        // The agent's model is therefore its own setting, not LLM_MODEL.
         'anthropic' => [
-            'key'     => env('ANTHROPIC_API_KEY'),
-            'base'    => 'https://api.anthropic.com/v1/messages',
-            'version' => '2023-06-01',
+            'model'        => env('ANTHROPIC_MODEL', 'claude-sonnet-5-5'),
+            'key'          => env('ANTHROPIC_API_KEY'),
+            'workspace_id' => env('ANTHROPIC_WORKSPACE_ID'),
+            'base'         => 'https://api.anthropic.com/v1/messages',
+            'version'      => '2023-06-01',
+
+            // Claude Sonnet 5.5 rejects a non-default temperature with HTTP 400,
+            // so LLM_TEMPERATURE is not sent unless this is switched on (for an
+            // older model that still accepts it). Traces then record 1.0, the
+            // API default, rather than a setting that was never applied.
+            'send_temperature' => (bool) env('ANTHROPIC_SEND_TEMPERATURE', false),
+
+            // Sonnet 5.5 always reasons; effort replaces temperature as the
+            // sampling-style setting and shares max_tokens with the answer, the
+            // same trade-off as GOOGLE_THINKING_LEVEL. low | medium | high | xhigh | max
+            'effort' => env('ANTHROPIC_EFFORT', 'medium'),
+
+            // Between tool calls the model's stated plan arrives as a thinking
+            // block, empty unless display is 'updates' (beta). The agent loop
+            // records it as the step's plan. Empty string disables it.
+            'thinking_display' => env('ANTHROPIC_THINKING_DISPLAY', 'updates'),
+
+            // Off (Week 5 Phase 2). A fallback model answering inside the same
+            // call would make the trace name a model that did not produce the
+            // reply. 'default' turns the server-side refusal fallback back on.
+            'fallbacks' => env('ANTHROPIC_FALLBACKS', ''),
         ],
 
         'openai' => [
@@ -97,10 +123,49 @@ return [
             'how much pesticide', 'how much herbicide', 'how much fungicide',
             'spray rate', 'mixing ratio', 'concentration per',
         ],
+        /*
+        | Week 5 Phase 3: the clinical rule matches what is being treated, not
+        | the verb alone. "how to diagnose maize leaf damage" is the officer's
+        | job; "diagnose the goat" is not. So:
+        |   always   - veterinary or medical whatever follows: always refused
+        |   terms    - clinical verbs and conditions: refused only when an
+        |              animal or human subject appears in the same text
+        |   subjects - those animal and human subjects, matched as whole words
+        |              ("pig" must not match "pigeon pea"). Words that are also
+        |              crop vocabulary are left out: "sow", "me", "family".
+        | Every phrase from the original list is still covered: the absolute
+        | ones are in 'always' (or broadened there), the verbs moved to 'terms'.
+        */
         'clinical' => [
-            'diagnose', 'diagnosis', 'prescribe', 'prescription',
-            'is my cow sick', 'medicine for', 'dewormer dose',
-            'antibiotic for', 'vaccinate my', 'treat my animal',
+            'always' => [
+                'is my cow sick', 'treat my animal', 'medicine for',
+                'dewormer', 'deworming', 'antibiotic', 'vaccinate', 'vaccination',
+                'veterinary drug', 'mastitis', 'east coast fever', 'newcastle disease',
+            ],
+            'terms' => [
+                'diagnose', 'diagnosed', 'diagnosis', 'diagnosing',
+                'prescribe', 'prescribed', 'prescription', 'medicine', 'medication',
+                'treat', 'treats', 'treated', 'treating', 'treatment', 'cure',
+                'sick', 'ill', 'illness', 'symptom', 'symptoms', 'rash', 'fever',
+                'infection', 'infected', 'injury', 'wound', 'limping', 'coughing',
+                'poisoned', 'poisoning', 'vet',
+            ],
+            'subjects' => [
+                // animals
+                'animal', 'animals', 'livestock', 'cattle', 'cow', 'cows', 'bull', 'bulls',
+                'heifer', 'heifers', 'calf', 'calves', 'ox', 'oxen', 'dairy', 'herd',
+                'goat', 'goats', 'kid', 'kids', 'sheep', 'lamb', 'lambs', 'ram',
+                'pig', 'pigs', 'piglet', 'piglets', 'swine',
+                'poultry', 'chicken', 'chickens', 'chick', 'chicks', 'hen', 'hens',
+                'broiler', 'broilers', 'duck', 'ducks', 'turkey', 'turkeys', 'flock',
+                'rabbit', 'rabbits', 'dog', 'dogs', 'puppy', 'cat', 'cats',
+                'donkey', 'donkeys', 'horse', 'horses', 'camel', 'camels',
+                // people
+                'patient', 'patients', 'person', 'people', 'human', 'humans',
+                'child', 'children', 'baby', 'babies', 'infant', 'man', 'woman', 'women',
+                'boy', 'girl', 'son', 'daughter', 'wife', 'husband',
+                'worker', 'workers', 'my skin', 'my eyes',
+            ],
         ],
     ],
 
@@ -180,6 +245,7 @@ return [
             'farm_profile_lookup',
             'schedule_visit',
             'log_followup',
+            'search_guidance',   // Week 5 Phase 2: the agent's access to the corpus
         ], array_map('trim', explode(',', (string) env('TOOLS_DISABLED', ''))))),
 
         /*
@@ -211,6 +277,25 @@ return [
     | asserted, never verified. Real deployment needs authentication before the
     | audit record carries weight.
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Bounded agent loop (Week 5)
+    |--------------------------------------------------------------------------
+    | Every limit is a named stop reason (App\Services\Agent\StopReason). One
+    | JSON trace per run is written to trace_path, whatever the stop.
+    */
+
+    'agent' => [
+        'max_iterations'           => (int) env('AGENT_MAX_ITERATIONS', 6),
+        'max_consecutive_failures' => (int) env('AGENT_MAX_FAILURES', 3),
+        'max_runtime_seconds'      => (int) env('AGENT_MAX_RUNTIME', 120),
+        'trace_path'               => storage_path('app/agent-runs'),
+
+        // resources/prompts/agent/{version}/system.md. A prompt change is a new
+        // version directory, and the version is recorded in every trace.
+        'prompt_version'           => env('AGENT_PROMPT_VERSION', 'v1.0'),
+    ],
+
     'officer' => [
         'id'   => env('OFFICER_ID', 'officer-001'),
         'name' => env('OFFICER_NAME', 'Extension Officer'),

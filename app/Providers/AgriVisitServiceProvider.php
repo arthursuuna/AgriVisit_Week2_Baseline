@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Services\Agent\AgentTraceWriter;
+use App\Services\Agent\BoundedAgentLoop;
+use App\Services\AgentTask\AgentTaskContract;
+use App\Services\AgentTask\AgentToolset;
 use App\Services\Checklist\ChecklistDrafter;
 use App\Services\Checklist\ChecklistParser;
 use App\Services\Checklist\RestrictedTopicGuard;
@@ -11,7 +15,9 @@ use App\Services\Corpus\RestrictedSectionStripper;
 use App\Services\Corpus\TextExtractor;
 use App\Services\Embedding\EmbeddingClient;
 use App\Services\Embedding\GeminiEmbeddingClient;
-use App\Services\Llm\AnthropicClient;
+use App\Services\Llm\ClaudeClient;
+use App\Services\Llm\FunctionCalling\AgentModelClient;
+use App\Services\Llm\FunctionCalling\ClaudeFunctionCallingClient;
 use App\Services\Llm\FunctionCalling\FunctionCallingClient;
 use App\Services\Llm\FunctionCalling\GeminiFunctionCallingClient;
 use App\Services\Llm\FunctionCalling\SchemaTranslator;
@@ -30,6 +36,8 @@ use App\Services\Tools\Catalogue\FaultyProbeTool;
 use App\Services\Tools\Catalogue\LogFollowupTool;
 use App\Services\Tools\Catalogue\MalformedProbeTool;
 use App\Services\Tools\Catalogue\ScheduleVisitTool;
+use App\Services\Tools\Catalogue\SearchGuidanceTool;
+use App\Services\Llm\FunctionCalling\ClaudeSchemaTranslator;
 use App\Services\Tools\PendingCallStore;
 use App\Services\Tools\SchemaValidator;
 use App\Services\Tools\ToolCallLog;
@@ -57,7 +65,8 @@ class AgriVisitServiceProvider extends ServiceProvider
             $config = config('agrivisit.llm');
 
             return match ($config['provider']) {
-                'anthropic' => new AnthropicClient($config),
+                // Week 5: ClaudeClient supersedes AnthropicClient (kept, unused).
+                'anthropic' => new ClaudeClient(self::claudeConfig()),
                 'openai'    => new OpenAiClient($config),
                 'google'    => new GoogleClient($config),
                 default     => throw new LlmException('Unknown LLM provider: ' . $config['provider']),
@@ -131,6 +140,7 @@ class AgriVisitServiceProvider extends ServiceProvider
             $registry->register($app->make(FarmProfileLookupTool::class));
             $registry->register($app->make(ScheduleVisitTool::class));
             $registry->register($app->make(LogFollowupTool::class));
+            $registry->register($app->make(SearchGuidanceTool::class));
 
             // Test instrumentation only: absent from the allow-list unless switched on.
             if (config('agrivisit.tools.probes_enabled')) {
@@ -157,6 +167,57 @@ class AgriVisitServiceProvider extends ServiceProvider
             config('agrivisit.llm')
         ));
 
+        // Week 5: the agent loop talks to Claude in Claude's message shape, on
+        // its own model setting, whatever LLM_PROVIDER says. Drafting, the Week 4
+        // tool console and embeddings stay on Gemini (prompts/week5-claude-and-gemini.md).
+        $this->app->singleton(ClaudeClient::class, fn () => new ClaudeClient(self::claudeConfig()));
+
+        $this->app->singleton(AgentModelClient::class, fn ($app) => new ClaudeFunctionCallingClient(
+            self::claudeConfig(),
+            $app->make(ClaudeClient::class)
+        ));
+
+        // Write-once trace files; the run itself carries prompt version and model.
+        $this->app->singleton(AgentTraceWriter::class, fn () => new AgentTraceWriter(
+            config('agrivisit.agent.trace_path')
+        ));
+
+        // Week 5 Phase 2: the corpus as a tool, with the threshold Week 3 evaluated.
+        $this->app->bind(SearchGuidanceTool::class, fn ($app) => new SearchGuidanceTool(
+            $app->make(Retriever::class),
+            $app->make(RestrictedTopicGuard::class),
+            (float) config('agrivisit.retrieval.threshold')
+        ));
+
+        $this->app->bind(AgentToolset::class, fn ($app) => new AgentToolset(
+            $app->make(ToolRegistry::class),
+            $app->make(ToolPolicy::class),
+            $app->make(ClaudeSchemaTranslator::class),
+            $app->make(PromptRepository::class),
+            config('agrivisit.agent.prompt_version')
+        ));
+
+        $this->app->bind(AgentTaskContract::class, fn ($app) => new AgentTaskContract(
+            $app->make(AgentToolset::class),
+            config('agrivisit.agent'),
+            config('agrivisit.officer'),
+            config('agrivisit.restricted'),
+            config('agrivisit.llm.anthropic.model')
+        ));
+
+        $this->app->bind(BoundedAgentLoop::class, fn ($app) => new BoundedAgentLoop(
+            $app->make(RestrictedTopicGuard::class),
+            $app->make(AgentModelClient::class),
+            $app->make(ToolInvoker::class),
+            $app->make(AgentTraceWriter::class),
+            // Only the limits: they are what the trace records under 'limits'.
+            array_intersect_key(config('agrivisit.agent'), array_flip([
+                'max_iterations', 'max_consecutive_failures', 'max_runtime_seconds',
+            ])),
+            null,
+            (string) config('agrivisit.llm.anthropic.model')
+        ));
+
         $this->app->bind(ToolSession::class, fn ($app) => new ToolSession(
             $app->make(RestrictedTopicGuard::class),
             $app->make(SchemaTranslator::class),
@@ -180,5 +241,11 @@ class AgriVisitServiceProvider extends ServiceProvider
             $app->make(ApprovalPreview::class),
             $app->make(ToolCallLog::class)
         ));
+    }
+
+    /** The shared llm settings with the Claude model in place of LLM_MODEL. */
+    private static function claudeConfig(): array
+    {
+        return ['model' => config('agrivisit.llm.anthropic.model')] + config('agrivisit.llm');
     }
 }
