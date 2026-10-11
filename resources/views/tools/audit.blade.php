@@ -28,7 +28,7 @@
 <div class="wrap">
 
     <header>
-        <span class="nav"><a href="{{ route('tools.index') }}">← Tool Console</a></span>
+        @include('_nav')
         <h1>AgriVisit</h1>
         <div class="sub">Approval audit — the latest 50 decisions on write actions, newest first: which the assistant
             proposed, which a person entered, and what was approved, rejected or left to expire.</div>

@@ -19,6 +19,8 @@
         .wrap { max-width: 860px; margin: 0 auto; }
         header { margin-bottom: 1.75rem; }
         h1 { margin: 0 0 .2rem; font-size: 1.6rem; color: var(--accent); }
+        .nav { float: right; font-size: .9rem; margin-top: .4rem; }
+        .nav a { color: var(--accent); }
         .sub { color: var(--muted); font-size: .92rem; }
         .card {
             background: #fff; border: 1px solid var(--line); border-radius: 10px;
@@ -70,9 +72,9 @@
 <div class="wrap">
 
     <header>
+        @include('_nav')
         <h1>AgriVisit</h1>
-        <div class="sub">Visit Prep Console — Week 3. Drafts grounded in Ugandan extension manuals.
-            <a href="{{ route('tools.index') }}" style="color:var(--accent)">Tool Console →</a></div>
+        <div class="sub">Visit Prep Console — Week 3. Drafts grounded in Ugandan extension manuals.</div>
     </header>
 
     @if ($errors->any())

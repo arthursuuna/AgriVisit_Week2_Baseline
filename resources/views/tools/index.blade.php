@@ -10,7 +10,7 @@
 <div class="wrap">
 
     <header>
-        <span class="nav"><a href="{{ route('tools.audit') }}">Approval audit →</a> · <a href="{{ route('checklist.index') }}">← Visit Prep Console</a></span>
+        @include('_nav')
         <h1>AgriVisit</h1>
         <div class="sub">Tool Console — Week 4. Ask the model, or call a tool by hand below; either way every call
             goes through the same gate, and write tools are held for approval.</div>

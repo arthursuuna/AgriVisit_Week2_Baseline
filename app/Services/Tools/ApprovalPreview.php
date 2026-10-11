@@ -168,9 +168,14 @@ class ApprovalPreview
             return $this->row('Existing visits', self::UNCONFIRMED, 'No farm ID was given.');
         }
 
+        // Past and upcoming are named separately: a future booking called "most
+        // recent" reads as a visit that already happened.
+        $today = now()->toDateString();
+
         try {
-            $count  = Visit::where('farm_id', $farmId)->count();
-            $latest = Visit::where('farm_id', $farmId)->max('visit_date');
+            $count = Visit::where('farm_id', $farmId)->count();
+            $past  = Visit::where('farm_id', $farmId)->whereDate('visit_date', '<', $today)->max('visit_date');
+            $next  = Visit::where('farm_id', $farmId)->whereDate('visit_date', '>=', $today)->min('visit_date');
         } catch (Throwable) {
             return $this->row('Existing visits', self::UNCONFIRMED, 'The visit records could not be read.');
         }
@@ -179,9 +184,17 @@ class ApprovalPreview
             return $this->row('Existing visits', 'None booked through AgriVisit', $this->lastFieldVisit($farmId));
         }
 
-        return $this->row('Existing visits',
-            sprintf('%d already booked; most recent on %s', $count, Carbon::parse($latest)->format('l j F Y')),
-            $this->lastFieldVisit($farmId));
+        $parts = ["{$count} already booked"];
+
+        if ($past !== null) {
+            $parts[] = 'latest was on ' . Carbon::parse($past)->format('l j F Y');
+        }
+
+        if ($next !== null) {
+            $parts[] = 'next is on ' . Carbon::parse($next)->format('l j F Y');
+        }
+
+        return $this->row('Existing visits', implode('; ', $parts), $this->lastFieldVisit($farmId));
     }
 
     private function visitRow(?string $visitRef, ?string $farmId): array

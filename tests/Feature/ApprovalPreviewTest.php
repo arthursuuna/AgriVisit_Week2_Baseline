@@ -228,15 +228,32 @@ class ApprovalPreviewTest extends TestCase
         $this->assertSame([], $this->toolLog->entries());
     }
 
-    public function test_existing_visits_are_counted_with_the_most_recent_date(): void
+    /** Today is Tuesday 6 October 2026 (setUp). */
+    private function existingVisits(array $dates): string
     {
-        foreach (['2026-10-20', '2026-11-03'] as $i => $date) {
+        foreach ($dates as $i => $date) {
             Visit::create(['visit_ref' => sprintf('V-%04d', $i + 1), 'farm_id' => 'UG-KYA-012',
                 'visit_date' => $date, 'purpose' => 'p', 'status' => 'scheduled']);
         }
 
-        $row = $this->row($this->preview('schedule_visit', $this->visitArgs()), 'Existing visits');
+        return $this->row($this->preview('schedule_visit', $this->visitArgs()), 'Existing visits')['value'];
+    }
 
-        $this->assertSame('2 already booked; most recent on Tuesday 3 November 2026', $row['value']);
+    public function test_existing_visits_all_ahead_name_the_next_not_the_most_recent(): void
+    {
+        $this->assertSame('2 already booked; next is on Tuesday 20 October 2026',
+            $this->existingVisits(['2026-10-20', '2026-11-03']));
+    }
+
+    public function test_existing_visits_all_past_name_the_latest(): void
+    {
+        $this->assertSame('2 already booked; latest was on Friday 2 October 2026',
+            $this->existingVisits(['2026-09-14', '2026-10-02']));
+    }
+
+    public function test_existing_visits_past_and_ahead_name_both(): void
+    {
+        $this->assertSame('3 already booked; latest was on Monday 5 October 2026; next is on Tuesday 6 October 2026',
+            $this->existingVisits(['2026-09-14', '2026-10-05', '2026-10-06']));
     }
 }
