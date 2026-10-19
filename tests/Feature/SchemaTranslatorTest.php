@@ -59,7 +59,7 @@ class SchemaTranslatorTest extends TestCase
 
     public function test_every_tool_translates(): void
     {
-        $this->assertCount(4, $this->tools());
+        $this->assertCount(5, $this->tools());
 
         foreach ($this->tools() as $name => $tool) {
             $declaration = $this->translator->toFunctionDeclaration($tool);

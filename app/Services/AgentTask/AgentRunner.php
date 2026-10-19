@@ -7,11 +7,15 @@ use App\Models\ToolApproval;
 use App\Services\Agent\AgentRun;
 use App\Services\Agent\BoundedAgentLoop;
 use App\Services\Agent\StopReason;
+use App\Services\Memory\FarmMemoryRecorder;
 use App\Services\Tools\ApprovalOutcome;
 use App\Services\Tools\ApprovalService;
 use App\Services\Tools\PendingCallStore;
 use App\Services\Tools\ToolInvoker;
+use Closure;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use LogicException;
 
 /**
@@ -39,6 +43,7 @@ class AgentRunner
         private readonly ApprovalService $approvals,
         private readonly ToolInvoker $invoker,
         private readonly PendingCallStore $pendingCalls,
+        private readonly FarmMemoryRecorder $memory,
     ) {
     }
 
@@ -59,14 +64,26 @@ class AgentRunner
 
     /**
      * The officer's decision on the call a run is waiting for. Returns the
-     * outcome and the updated record; a token that is not this run's, or is
-     * already used, changes nothing.
+     * outcome and the updated record; a token that is not this run's changes
+     * nothing.
+     *
+     * A decision on a run that is not waiting (closed, already decided, or
+     * moved by another request since $record was read) throws
+     * IllegalRunTransition before the token is touched.
      *
      * @return array{0: ApprovalOutcome, 1: AgentRunRecord}
      */
     public function decide(AgentRunRecord $record, string $token, string $decision, ?string $reason): array
     {
-        if ($record->status !== StopReason::AWAITING_APPROVAL || ($record->approval['token'] ?? null) !== $token) {
+        return $this->exclusively($record, fn (AgentRunRecord $record) => $this->decideHeld($record, $token, $decision, $reason));
+    }
+
+    private function decideHeld(AgentRunRecord $record, string $token, string $decision, ?string $reason): array
+    {
+        RunState::check(RunState::forStatus($record->status),
+            $decision === 'approve' ? AgentRun::RUNNING : StopReason::REJECTED, $record->run_id);
+
+        if (($record->approval['token'] ?? null) !== $token) {
             return [new ApprovalOutcome(ApprovalOutcome::UNKNOWN), $record];
         }
 
@@ -78,6 +95,11 @@ class AgentRunner
         });
 
         $ms = round((hrtime(true) - $started) / 1e6, 2);
+
+        // Week 6: the decision is a fact about the farm, recorded here and
+        // nowhere else, from the held call itself. Before the resume, so a
+        // run that fails afterwards still leaves the decision remembered.
+        $this->memory->decided($outcome, $record->run_id, $record->pending, (int) $record->approval['expires_at']);
 
         $run  = $this->store->restore($record);
         $loop = app(BoundedAgentLoop::class);
@@ -110,6 +132,10 @@ class AgentRunner
      * run would show as waiting forever; this runs whenever a run is read for
      * display. The closure is written, not just displayed: the run is over,
      * and the record, the trace and the approval audit should all say so.
+     *
+     * Two page loads, or a page load and the officer's decision, can try to
+     * move the same run at once. The loser's IllegalRunTransition is logged
+     * as a warning and the page shows the run as the winner left it.
      */
     public function closeIfLapsed(AgentRunRecord $record): AgentRunRecord
     {
@@ -121,6 +147,19 @@ class AgentRunner
             return $record;
         }
 
+        try {
+            return $this->exclusively($record, fn (AgentRunRecord $record) => $this->closeLapsedHeld($record, $token, $expiresAt));
+        } catch (IllegalRunTransition $e) {
+            Log::warning('Lazy expiry lost a race: ' . $e->getMessage(), ['run_id' => $record->run_id]);
+
+            return $record->fresh();
+        }
+    }
+
+    private function closeLapsedHeld(AgentRunRecord $record, string $token, int $expiresAt): AgentRunRecord
+    {
+        RunState::check(RunState::forStatus($record->status), StopReason::REJECTED, $record->run_id);
+
         // The Week 4 path for a decision on an expired token: it writes the
         // EXPIRED row to tool_approvals and never reaches the executor.
         $outcome = $this->approvals->decide($token, 'reject', null, function () {
@@ -128,9 +167,13 @@ class AgentRunner
         });
 
         if ($outcome->status === ApprovalOutcome::ALREADY_USED) {
-            // Decided by the officer in the meantime; that path has closed it.
+            // Consumed outside this run while it held the lock: decided on
+            // the Week 4 console, or by a resume that crashed after consuming
+            // it. Nothing here can tell which, so the run is left as it is.
             return $record->fresh();
         }
+
+        $this->memory->decided($outcome, $record->run_id, $record->pending, $expiresAt);
 
         $closed = Carbon::createFromTimestamp($expiresAt)->timezone(config('app.timezone'))->format('j M Y H:i');
 
@@ -147,6 +190,41 @@ class AgentRunner
         AgentRunRecord::where('status', StopReason::AWAITING_APPROVAL)->get()->each(
             fn (AgentRunRecord $record) => $this->closeIfLapsed($record)
         );
+    }
+
+    /**
+     * Runs $move with this run to itself. The lock makes one request the
+     * winner; the run is re-read under it, so a request working from a copy
+     * read before another request moved the run loses too. Either way the
+     * loser throws before it has consumed a token, called the model or
+     * written a trace.
+     *
+     * @template T
+     * @param Closure(AgentRunRecord): T $move
+     * @return T
+     */
+    private function exclusively(AgentRunRecord $record, Closure $move): mixed
+    {
+        // As long as the longest request may live (AgentController's time limit).
+        $seconds = (int) config('agrivisit.agent.max_runtime_seconds') + 2 * (int) config('agrivisit.llm.timeout') + 10;
+        $lock    = Cache::lock("agent-run:{$record->run_id}", $seconds);
+
+        if (! $lock->get()) {
+            throw IllegalRunTransition::lostRace($record->run_id, 'it is being moved by a request still in progress');
+        }
+
+        try {
+            $fresh = $record->fresh() ?? throw IllegalRunTransition::lostRace($record->run_id, 'it is no longer stored');
+
+            if ($fresh->status !== $record->status || (int) $fresh->segment !== (int) $record->segment) {
+                throw IllegalRunTransition::lostRace($record->run_id,
+                    "read as {$record->status} at segment {$record->segment}, now {$fresh->status} at segment {$fresh->segment}");
+            }
+
+            return $move($fresh);
+        } finally {
+            $lock->release();
+        }
     }
 
     /** A run that stopped on a write is held in the Week 4 flow for the officer. */

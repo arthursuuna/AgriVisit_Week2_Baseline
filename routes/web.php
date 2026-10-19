@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\ChecklistController;
+use App\Http\Controllers\FarmMemoryController;
 use App\Http\Controllers\ToolConsoleController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,3 +24,8 @@ Route::get('/agent/runs/{run}', [AgentController::class, 'show'])->name('agent.r
 Route::post('/agent/runs/{run}/decision', [AgentController::class, 'decide'])->name('agent.runs.decide');
 Route::get('/agent/runs/{run}/trace/{file}', [AgentController::class, 'trace'])->name('agent.runs.trace')
     ->where('file', '[A-Za-z0-9._-]+\.json');
+
+// Week 6: what the assistant can recall about a farm, and deleting it.
+Route::get('/farms/{farmId}/memory', [FarmMemoryController::class, 'show'])->name('memory.show');
+Route::delete('/farms/{farmId}/memory/{memoryRef}', [FarmMemoryController::class, 'destroy'])->name('memory.destroy')
+    ->where('memoryRef', 'M-[0-9]+');

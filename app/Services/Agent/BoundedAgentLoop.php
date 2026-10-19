@@ -61,7 +61,7 @@ class BoundedAgentLoop
             return $this->finish($run, StopReason::GUARD_REFUSED, $this->guard->refusalFor($category));
         }
 
-        $run->pushUserTurn($goal);
+        $run->begin();
 
         return $this->iterate($run);
     }
@@ -76,7 +76,7 @@ class BoundedAgentLoop
      */
     public function resumeApproved(AgentRun $run, ToolResult $result, ?string $approvalRef = null, float $durationMs = 0.0): AgentRun
     {
-        $pending = $this->openSegment($run);
+        $pending = $this->openSegment($run, true);
 
         $run->addStep(new AgentStep(
             iteration: $run->iterations,
@@ -124,7 +124,7 @@ class BoundedAgentLoop
      */
     public function reject(AgentRun $run, string $message): AgentRun
     {
-        $pending = $this->openSegment($run);
+        $pending = $this->openSegment($run, false);
 
         $run->addStep(new AgentStep(
             iteration: $run->iterations,
@@ -227,16 +227,20 @@ class BoundedAgentLoop
         }
     }
 
-    /** @return array the pending call, after checking the run is suspended on one */
-    private function openSegment(AgentRun $run): array
+    /**
+     * @return array the pending call. The move itself is checked by
+     *               AgentRun::beginSegment(), before anything on the run changes.
+     */
+    private function openSegment(AgentRun $run, bool $approved): array
     {
-        if ($run->status !== StopReason::AWAITING_APPROVAL || $run->pending === null) {
-            throw new LogicException("Run {$run->runId} is not awaiting approval (status {$run->status}).");
+        $pending = $run->pending;
+        $run->beginSegment($approved);
+
+        if ($pending === null) {
+            throw new LogicException("Run {$run->runId} is awaiting approval with no pending call.");
         }
 
-        $pending      = $run->pending;
         $run->pending = null;
-        $run->beginSegment();
 
         return $pending;
     }

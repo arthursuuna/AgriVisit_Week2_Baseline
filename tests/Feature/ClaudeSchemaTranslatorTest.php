@@ -36,12 +36,12 @@ class ClaudeSchemaTranslatorTest extends TestCase
         return $this->translator->toToolDeclaration($this->tools()[$name]);
     }
 
-    public function test_all_four_tools_translate(): void
+    public function test_all_five_tools_translate(): void
     {
         $declarations = $this->translator->toToolDeclarations($this->tools());
 
         $this->assertSame(
-            ['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance'],
+            ['farm_profile_lookup', 'schedule_visit', 'log_followup', 'search_guidance', 'recall_farm_history'],
             array_column($declarations, 'name')
         );
 

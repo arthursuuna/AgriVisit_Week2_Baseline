@@ -25,7 +25,8 @@ class AgentStepView
 
     /** What a tool's count is a count of; a tool not listed says "results". */
     private const COUNT_NOUNS = [
-        'search_guidance' => ['passage', 'passages'],
+        'search_guidance'     => ['passage', 'passages'],
+        'recall_farm_history' => ['past decision', 'past decisions'],
     ];
 
     /** @return list<array<string, mixed>> */
@@ -47,11 +48,18 @@ class AgentStepView
             $label = $outcome;
 
             if ($kind === self::OK && $step['tool'] !== null) {
-                $count = $results[self::key($step['tool'], $step['arguments'] ?? [])]['data']['count'] ?? null;
+                $data  = $results[self::key($step['tool'], $step['arguments'] ?? [])]['data'] ?? [];
+                $count = $data['count'] ?? null;
 
                 if (is_int($count)) {
                     [$one, $many] = self::COUNT_NOUNS[$step['tool']] ?? ['result', 'results'];
                     $label .= " — {$count} " . ($count === 1 ? $one : $many);
+                }
+
+                // Week 6: which memories reached the agent, so the officer can
+                // see every one it was shown, cited or not.
+                if ($refs = array_column($data['entries'] ?? [], 'memory_ref')) {
+                    $label .= ' (' . implode(', ', $refs) . ')';
                 }
             }
 
@@ -79,6 +87,28 @@ class AgentStepView
                 'message'    => $step['message'] ?? null,
             ];
         }, $steps, array_keys($steps));
+    }
+
+    /**
+     * Every memory entry recall_farm_history returned in this run, as the
+     * model received it (not re-read from farm_memories, so an entry deleted
+     * since still shows what the run was told). For the approval panel.
+     *
+     * @return list<array>
+     */
+    public static function recalledMemories(AgentRunRecord $run): array
+    {
+        $entries = [];
+
+        foreach (self::resultsByCall($run->messages ?? []) as $key => $result) {
+            if (str_starts_with($key, 'recall_farm_history ')) {
+                foreach ($result['data']['entries'] ?? [] as $entry) {
+                    $entries[$entry['memory_ref']] = $entry;
+                }
+            }
+        }
+
+        return array_values($entries);
     }
 
     /** A parameter value as one line of text. */

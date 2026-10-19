@@ -11,11 +11,19 @@ use Illuminate\Support\Carbon;
 /**
  * Saves and restores agent runs: the database row is working state, the trace
  * file is the audit record. Nothing here reads or writes a trace.
+ *
+ * A save is a move of the stored run, so it is checked against RunState: a
+ * closed row is never written again, and a row waiting on a call takes exactly
+ * one decision (the next segment), whoever calls save().
  */
 class AgentRunStore
 {
     public function save(AgentRun $run, ?array $approval = null): AgentRunRecord
     {
+        if (($stored = $this->find($run->runId)) !== null) {
+            $this->checkMove($stored, $run);
+        }
+
         $tokens = $run->totalTokens();
 
         return AgentRunRecord::updateOrCreate(['run_id' => $run->runId], [
@@ -45,6 +53,21 @@ class AgentRunStore
             'started_at'           => Carbon::parse($run->startedAt),
             'ended_at'             => $run->endedAt ? Carbon::parse($run->endedAt) : null,
         ]);
+    }
+
+    /** @throws IllegalRunTransition */
+    private function checkMove(AgentRunRecord $stored, AgentRun $run): void
+    {
+        $from = RunState::forStatus($stored->status);
+
+        if ($from === RunState::CLOSED) {
+            RunState::check($from, $run->status, $run->runId);
+        }
+
+        if ($from === RunState::AWAITING_APPROVAL && $run->segment !== $stored->segment + 1) {
+            throw IllegalRunTransition::between($run->runId, $from, $run->status,
+                "One decision per held call: the stored run waits at segment {$stored->segment}; this save is segment {$run->segment}.");
+        }
     }
 
     public function find(string $runId): ?AgentRunRecord

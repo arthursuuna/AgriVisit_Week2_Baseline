@@ -2,6 +2,10 @@
     The approval panel. $held comes from ApprovalService::hold(); the summary
     and preview shown here are the exact values stored and later recorded.
     Expects: $held, $action (route to post the decision to), $expiry (minutes).
+    Optional (agent runs, Week 6): $reasoning, the proposing step's plan, and
+    $recalled, the past decisions the run was given. The panel is where a
+    suspended run ends, so what shaped the proposal must be on it, not a step
+    above (the Phase 2 live run cited M-0001 one step before proposing).
 --}}
 <div class="banner pending approval">
     <strong>
@@ -10,6 +14,25 @@
     </strong>
 
     <p class="summary">{{ $held['summary'] }}</p>
+
+    @if (! empty($reasoning))
+        <div class="reasoning">
+            <div class="help" style="margin:0 0 .2rem">The assistant's reasoning for this proposal, as it gave it:</div>
+            <blockquote style="margin:0 0 .8rem;padding:.3rem .8rem;border-left:3px solid var(--line);white-space:pre-wrap">{{ $reasoning }}</blockquote>
+        </div>
+    @endif
+
+    @if (! empty($recalled))
+        <div class="recalled">
+            <div class="help" style="margin:0 0 .2rem">Past decisions the assistant recalled in this run:</div>
+            <ul style="margin:0 0 .8rem;padding-left:1.2rem;font-size:.9rem">
+                @foreach ($recalled as $r)
+                    <li><span class="code">{{ $r['memory_ref'] }}</span> — {{ $r['summary'] }}
+                        @if (! empty($r['officer_reason'])) Reason given: “{{ $r['officer_reason'] }}”@endif</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
 
     <table class="preview">
         @foreach ($held['preview'] as $row)

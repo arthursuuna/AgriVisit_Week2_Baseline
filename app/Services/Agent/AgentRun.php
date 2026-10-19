@@ -2,6 +2,7 @@
 
 namespace App\Services\Agent;
 
+use App\Services\AgentTask\RunState;
 use Closure;
 use Illuminate\Support\Str;
 use stdClass;
@@ -124,19 +125,34 @@ final class AgentRun
         return $run;
     }
 
-    /**
-     * Opens the next segment of a suspended run: running again, the clock
-     * restarted, earlier active time carried, and the previous trace named.
-     */
-    public function beginSegment(): void
+    /** — → RUNNING: the goal, having passed the guard, becomes the first user turn. */
+    public function begin(): void
     {
+        RunState::check(RunState::of($this), self::RUNNING, $this->runId);
+
+        $this->pushUserTurn($this->goal);
+    }
+
+    /**
+     * Opens the next segment of a suspended run: the clock restarted, earlier
+     * active time carried, and the previous trace named. Approved, the run is
+     * running again (AWAITING_APPROVAL → RUNNING). Declined, it stays waiting
+     * until stop(REJECTED) closes it, so it never passes through RUNNING.
+     */
+    public function beginSegment(bool $approved = true): void
+    {
+        RunState::check(RunState::of($this), $approved ? self::RUNNING : StopReason::REJECTED, $this->runId);
+
         $this->activeBefore     = $this->elapsedSeconds();
         $this->activeAtStop     = null;
         $this->segmentStartedAt = ($this->clock)();
         $this->resumedFrom      = end($this->traceFiles) ?: null;
         $this->segment++;
-        $this->status           = self::RUNNING;
         $this->endedAt          = null;
+
+        if ($approved) {
+            $this->status = self::RUNNING;
+        }
     }
 
     /**
@@ -236,6 +252,8 @@ final class AgentRun
 
     public function stop(string $reason, string $summary): self
     {
+        RunState::check(RunState::of($this), $reason, $this->runId);
+
         $this->activeAtStop = $this->elapsedSeconds();
         $this->status       = $reason;
         $this->summary      = $summary;

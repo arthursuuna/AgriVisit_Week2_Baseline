@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\AgentRunRecord;
 use App\Services\AgentTask\AgentRunner;
+use App\Services\AgentTask\IllegalRunTransition;
 use App\Services\Tools\ApprovalOutcome;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -74,12 +76,22 @@ class AgentController extends Controller
     {
         set_time_limit((int) config('agrivisit.agent.max_runtime_seconds') + 2 * (int) config('agrivisit.llm.timeout') + 10);
 
-        [$outcome, $record] = $this->runner->decide(
-            $run,
-            (string) $request->input('token', ''),
-            $request->input('decision') === 'approve' ? 'approve' : 'reject',
-            $request->input('reason'),
-        );
+        try {
+            [$outcome, $record] = $this->runner->decide(
+                $run,
+                (string) $request->input('token', ''),
+                $request->input('decision') === 'approve' ? 'approve' : 'reject',
+                $request->input('reason'),
+            );
+        } catch (IllegalRunTransition $e) {
+            // A second submission, or a decision on a run that has already
+            // closed. Nothing changed; the officer sees the run as it stands.
+            Log::warning('Agent decision refused: ' . $e->getMessage(), ['run_id' => $run->run_id]);
+
+            return redirect()->route('agent.runs.show', $run->run_id)->with('decision', [
+                'status' => ApprovalOutcome::ALREADY_USED, 'approval_ref' => null, 'result_code' => null, 'result_ref' => null, 'reason' => null,
+            ]);
+        }
 
         return redirect()->route('agent.runs.show', $record->run_id)->with('decision', [
             'status'       => $outcome->status,

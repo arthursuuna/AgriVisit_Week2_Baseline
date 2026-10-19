@@ -10,6 +10,7 @@ use App\Services\Agent\AgentTraceWriter;
 use App\Services\Agent\StopReason;
 use App\Services\AgentTask\AgentRunStore;
 use App\Services\AgentTask\AgentRunner;
+use App\Services\AgentTask\IllegalRunTransition;
 use App\Services\Llm\FunctionCalling\AgentModelClient;
 use App\Services\Tools\ApprovalOutcome;
 use App\Services\Tools\ToolCallLog;
@@ -331,9 +332,13 @@ class AgentResumeTest extends TestCase
         $this->decide($record, 'approve');
 
         // A second submission of the same token, against the stale record.
-        [$again] = app(AgentRunner::class)->decide($record, $token, 'approve', null);
+        // Since Week 6 the run refuses the move before the token is touched.
+        try {
+            app(AgentRunner::class)->decide($record, $token, 'approve', null);
+            $this->fail('A second decision on the same held call must throw.');
+        } catch (IllegalRunTransition) {
+        }
 
-        $this->assertSame(ApprovalOutcome::ALREADY_USED, $again->status);
         $this->assertSame(1, Visit::count());
         $this->assertSame(1, ToolApproval::count());
     }
@@ -345,6 +350,7 @@ class AgentResumeTest extends TestCase
         $clock = function () use (&$now) { return $now; };
 
         $run = new AgentRun('goal', ['max_iterations' => 6, 'max_consecutive_failures' => 3, 'max_runtime_seconds' => 120], $clock);
+        $run->begin();
         $now += 10;                                   // 10 s of work
         $run->stop(StopReason::AWAITING_APPROVAL, 'held');
         $now += 86400;                                // a day waiting for the officer
@@ -360,6 +366,7 @@ class AgentResumeTest extends TestCase
     {
         $writer = new AgentTraceWriter($this->dir . '/runs');
         $run    = new AgentRun('goal', ['max_iterations' => 1, 'max_consecutive_failures' => 1, 'max_runtime_seconds' => 1], fn () => 0.0);
+        $run->begin();
         $run->stop(StopReason::GOAL_REACHED, 'done');
 
         $writer->write($run);

@@ -63,7 +63,7 @@ class RunAgentCommandTest extends TestCase
         $this->assertStringNotContainsString('{{today}}', $fake->requests[0]['system']);
 
         $trace = json_decode(file_get_contents(glob($this->dir . '/runs/*.json')[0]), true);
-        $this->assertSame('v1.0', $trace['prompt_version']);
+        $this->assertSame('v1.1', $trace['prompt_version']);
         $this->assertSame(config('agrivisit.llm.anthropic.model'), $trace['model']);
     }
 

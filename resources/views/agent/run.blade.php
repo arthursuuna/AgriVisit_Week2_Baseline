@@ -86,6 +86,9 @@
                 @if ($step['message'])
                     <p class="message">{{ $step['message'] }}</p>
                 @endif
+                @if ($step['tool'] === 'recall_farm_history' && isset($step['rawArguments']['farm_id']))
+                    <p class="message"><a href="{{ route('memory.show', $step['rawArguments']['farm_id']) }}">Everything the assistant can recall about {{ $step['rawArguments']['farm_id'] }} →</a></p>
+                @endif
             </div>
         @empty
             <p class="muted" style="margin:0">No steps: the run ended before the model was called.</p>
@@ -95,7 +98,13 @@
     {{-- One treatment per stop reason --}}
     @if ($reason === StopReason::AWAITING_APPROVAL && $run->approval)
         <p style="margin:0 0 .5rem;font-weight:600">Nothing has been written yet.</p>
-        @include('tools._approval', ['held' => $run->approval, 'action' => route('agent.runs.decide', $run->run_id)])
+        @include('tools._approval', [
+            'held'      => $run->approval,
+            'action'    => route('agent.runs.decide', $run->run_id),
+            // The plan of the step that proposed the held call (Week 6 Phase 3).
+            'recalled'  => \App\Support\AgentStepView::recalledMemories($run),
+            'reasoning' => collect($run->steps)->last(fn ($s) => $s['outcome'] === \App\Services\Tools\ToolResult::APPROVAL_REQUIRED)['plan'] ?? null,
+        ])
 
     @elseif ($reason === StopReason::GUARD_REFUSED)
         <div class="banner refused">

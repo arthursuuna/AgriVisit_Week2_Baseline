@@ -246,6 +246,7 @@ return [
             'schedule_visit',
             'log_followup',
             'search_guidance',   // Week 5 Phase 2: the agent's access to the corpus
+            'recall_farm_history', // Week 6 Phase 2: past officer decisions, read-only
         ], array_map('trim', explode(',', (string) env('TOOLS_DISABLED', ''))))),
 
         /*
@@ -293,7 +294,22 @@ return [
 
         // resources/prompts/agent/{version}/system.md. A prompt change is a new
         // version directory, and the version is recorded in every trace.
-        'prompt_version'           => env('AGENT_PROMPT_VERSION', 'v1.0'),
+        'prompt_version'           => env('AGENT_PROMPT_VERSION', 'v1.1'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Farm memory (Week 6)
+    |--------------------------------------------------------------------------
+    | Retention is a correctness control, not a storage one: a stale decision
+    | ("the farmer is away until November") is cited with the same confidence
+    | as a fresh one. Entries older than this are not returned by
+    | recall_farm_history. They are NOT purged: there is no scheduler, so they
+    | stay in the table until an officer deletes them on the memory page.
+    */
+
+    'memory' => [
+        'retention_months' => (int) env('MEMORY_RETENTION_MONTHS', 12),
     ],
 
     'officer' => [

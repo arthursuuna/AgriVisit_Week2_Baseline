@@ -35,6 +35,7 @@ use App\Services\Tools\Catalogue\FarmProfileLookupTool;
 use App\Services\Tools\Catalogue\FaultyProbeTool;
 use App\Services\Tools\Catalogue\LogFollowupTool;
 use App\Services\Tools\Catalogue\MalformedProbeTool;
+use App\Services\Tools\Catalogue\RecallFarmHistoryTool;
 use App\Services\Tools\Catalogue\ScheduleVisitTool;
 use App\Services\Tools\Catalogue\SearchGuidanceTool;
 use App\Services\Llm\FunctionCalling\ClaudeSchemaTranslator;
@@ -141,6 +142,7 @@ class AgriVisitServiceProvider extends ServiceProvider
             $registry->register($app->make(ScheduleVisitTool::class));
             $registry->register($app->make(LogFollowupTool::class));
             $registry->register($app->make(SearchGuidanceTool::class));
+            $registry->register($app->make(RecallFarmHistoryTool::class));
 
             // Test instrumentation only: absent from the allow-list unless switched on.
             if (config('agrivisit.tools.probes_enabled')) {

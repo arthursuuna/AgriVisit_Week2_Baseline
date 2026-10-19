@@ -210,13 +210,21 @@ class ToolSession
     }
 
     /**
+     * Not offered to this console's model, though enabled and still callable
+     * by hand. recall_farm_history: this prompt (tools/v1.0) has no memory
+     * citation rule, so the model here would read memory with none of the
+     * agent's discipline (Week 6 Phase 3).
+     */
+    public const NOT_OFFERED = ['recall_farm_history'];
+
+    /**
      * Every enabled tool, translated. A disabled tool is not offered, and a
      * diagnostic probe is never offered, enabled or not.
      */
     private function declarations(): array
     {
         $enabled = array_filter($this->registry->all(), fn (ToolContract $tool) => ! $tool instanceof DiagnosticTool
-            && $this->policy->allows($tool));
+            && $this->policy->allows($tool) && ! in_array($tool->name(), self::NOT_OFFERED, true));
 
         return array_values(array_map(fn (ToolContract $tool) => $this->translator->toFunctionDeclaration($tool), $enabled));
     }
